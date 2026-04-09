@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pydantic
+pydantic-settings
+langchain
+langchain-community
+redis
+python-dotenv
+scikit-learn
+pandas
+numpy
+httpx
