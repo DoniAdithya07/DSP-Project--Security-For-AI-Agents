@@ -28,5 +28,13 @@ services:
     ports:
       - "6379:6379"
 
+  frontend:
+    build: ./frontend
+    container_name: aegismind-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:

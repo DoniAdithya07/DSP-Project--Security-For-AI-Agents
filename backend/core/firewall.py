@@ -16,8 +16,8 @@ class PromptFirewall:
             
             # Jailbreak & Personas
             ("jailbreak_dan", re.compile(r"(?i)\b(DAN|do anything now|developer mode|unrestricted mode|god mode|always respond)\b"), "Jailbreak persona attempt (DAN/DevMode)", 1.0),
-            ("role_manipulation", re.compile(r"(?i)\b(as an?|act as|pretend to be|switch to|you are now(?: in)?|from now on you are)\s+(?:the\s+)?(admin|developer|root|system|hacker)\b"), "Role manipulation attempt", 0.85),
-            ("policy_bypass", re.compile(r"(?i)\b(override|bypass|disable|ignore|turn off)\s+(policy(?:\s+engine)?|guardrails|security|firewall|filters|censorship)\b"), "Policy bypass attempt", 0.90),
+            ("role_manipulation", re.compile(r"(?i)\b(as an?|act as|pretend to be|switch to|you are now(?: in)?|from now on you are|log me in as|give me access as)\s+(?:the\s+)?(admin|developer|root|system|hacker)\b"), "Role manipulation attempt", 0.85),
+            ("policy_bypass", re.compile(r"(?i)\b(override|bypass|disable|ignore|turn off)\s+(policy(?:\s+engine)?|guardrails|security|firewall|filters|censorship|auth|authentication|login|access)\b"), "Policy bypass attempt", 0.90),
             
             # Data Mining & Exfiltration
             ("secret_exfiltration", re.compile(r"(?i)\b(show|reveal|get|dump|list)\b.{0,40}\b(secret|secrets|credentials|keys|tokens|passwords|api[_\s]?keys)\b"), "Sensitive secret exfiltration attempt", 0.90),
@@ -40,8 +40,8 @@ class PromptFirewall:
             re.compile(r"(?i)\brm\s+-rf\b"),
             re.compile(r"(?i)\bbypass\s+security\b"),
         ]
-        self.block_threshold = 0.70
-        self.review_threshold = 0.45
+        self.block_threshold = 0.60
+        self.review_threshold = 0.30
 
     def _analyze_base64(self, prompt: str) -> Dict[str, Any]:
         findings: List[str] = []

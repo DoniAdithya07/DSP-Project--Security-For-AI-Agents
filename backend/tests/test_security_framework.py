@@ -26,10 +26,14 @@ def mock_llm_evaluator(prompt: str):
 # apply mock
 llm_evaluator.evaluate = mock_llm_evaluator
 
+# Set API Key for tests to allow Legacy auth
+os.environ["SECURITY_API_KEY"] = "test-legacy-key"
+
 def _clear_tables():
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM security_events"))
         conn.execute(text("DELETE FROM audit_logs"))
+        conn.execute(text("DELETE FROM agent_identities"))
 
 
 def setup_function():
@@ -43,7 +47,11 @@ def _execute(prompt: str, role: str = "researcher", requested_tool=None, tool_ar
         payload["requested_tool"] = requested_tool
     if tool_args is not None:
         payload["tool_args"] = tool_args
-    return client.post("/agent/execute", json=payload)
+    return client.post(
+        "/agent/execute", 
+        json=payload,
+        headers={"X-API-Key": "test-legacy-key"}
+    )
 
 
 def _execute_with_session(session_id: str, prompt: str, role: str = "researcher", requested_tool=None, tool_args=None):
@@ -52,7 +60,11 @@ def _execute_with_session(session_id: str, prompt: str, role: str = "researcher"
         payload["requested_tool"] = requested_tool
     if tool_args is not None:
         payload["tool_args"] = tool_args
-    return client.post("/agent/execute", json=payload)
+    return client.post(
+        "/agent/execute", 
+        json=payload,
+        headers={"X-API-Key": "test-legacy-key"}
+    )
 
 
 def test_safe_prompt_executes():
@@ -188,3 +200,28 @@ def test_llm_reasoning_threat_detected():
         assert "llm_reasoning_threat" in body["firewall"]["matched_rules"]
     finally:
         ml_engine.predict_risk = original_predict
+
+def test_missing_identity_fails():
+    # If no headers given, it falls back to required_key, but if required_key is active and mismatched/missing -> 401
+    response = client.post("/agent/execute", json={"prompt": "Hello", "role": "admin"})
+    assert response.status_code == 401
+    assert "credentials" in response.json().get("detail", "").lower()
+
+def test_rate_limiting_enforced():
+    from backend.core.rate_limit import rate_limiter
+    original_limit = rate_limiter.limit
+    
+    try:
+        # artificially lower limit to test 429
+        rate_limiter.limit = 1
+        
+        # request 1 should pass
+        res1 = _execute("Hello")
+        assert res1.status_code == 200
+        
+        # request 2 should fail
+        res2 = _execute("Hello again")
+        assert res2.status_code == 429
+        assert "rate limit" in res2.json().get("detail", "").lower()
+    finally:
+        rate_limiter.limit = original_limit

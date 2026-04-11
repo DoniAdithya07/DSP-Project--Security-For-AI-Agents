@@ -1,6 +1,17 @@
-from sqlalchemy import Column, DateTime, Float, Integer, JSON, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, JSON, String, Text, Boolean
 from ..db.config import Base
 import datetime
+
+class AgentIdentity(Base):
+    __tablename__ = "agent_identities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(String, unique=True, index=True)
+    role = Column(String)  # e.g., 'researcher', 'admin'
+    api_key_hash = Column(String)  # SHA-256 hashed token
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 
 class SecurityEvent(Base):
     __tablename__ = "security_events"

@@ -45,6 +45,7 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [executionResult, setExecutionResult] = useState(null);
   const [executionError, setExecutionError] = useState('');
+  const [apiKey, setApiKey] = useState(localStorage.getItem('aegis_api_key') || '');
   const [sessionId, setSessionId] = useState(() => {
     const existing = localStorage.getItem('aegismind_session_id');
     return existing || createSessionId();
@@ -56,20 +57,28 @@ const App = () => {
     risk: 0
   });
 
+  const getHeaders = () => {
+      return {
+          'X-API-Key': apiKey,
+          'X-Agent-Id': 'admin-agent'
+      };
+  };
+
   useEffect(() => {
     fetchLogs();
     const interval = setInterval(fetchLogs, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [apiKey]);
 
   useEffect(() => {
     localStorage.setItem('aegismind_session_id', sessionId);
   }, [sessionId]);
 
   const fetchLogs = async () => {
+    if (!apiKey) return;
     try {
-      const securityRes = await axios.get('/api/logs/security');
-      const auditRes = await axios.get('/api/logs/audit');
+      const securityRes = await axios.get('/api/logs/security', { headers: getHeaders() });
+      const auditRes = await axios.get('/api/logs/audit', { headers: getHeaders() });
       setSecurityEvents(securityRes.data);
       setLogs(auditRes.data);
       
@@ -97,14 +106,19 @@ const App = () => {
   const executePrompt = async () => {
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt) return;
+    if (!apiKey) {
+        setExecutionError("Missing Master API Key. Please paste it to continue.");
+        return;
+    }
     setLoading(true);
     setExecutionError('');
+    setExecutionResult(null);
     try {
       const response = await axios.post('/api/agent/execute', {
         session_id: sessionId,
         prompt: trimmedPrompt,
         role: 'researcher'
-      });
+      }, { headers: getHeaders() });
       if (response?.data?.session_id) {
         setSessionId(response.data.session_id);
       }
@@ -296,11 +310,22 @@ const App = () => {
 
               {/* Interaction Terminal */}
               <div className="glass-card p-8 border-t-2 border-t-blue-500/30 glow-blue">
-                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <Terminal className="text-blue-400" />
-                    Agent Security Playground
-                 </h3>
-                 <p className="text-sm text-gray-400 mb-6">Test the framework by submitting prompts. Try to "trick" the agent or access restricted tools.</p>
+                 <div className="flex justify-between items-start mb-6">
+                     <div>
+                       <h3 className="text-xl font-bold mb-1 flex items-center gap-2">
+                          <Terminal className="text-blue-400" />
+                          Agent Security Playground
+                       </h3>
+                       <p className="text-sm text-gray-400">Test the framework by submitting prompts. Try to "trick" the agent or access restricted tools.</p>
+                     </div>
+                     <input 
+                        type="password" 
+                        value={apiKey} 
+                        onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('aegis_api_key', e.target.value); }} 
+                        placeholder="Paste Master API Key..." 
+                        className="bg-gray-900 border border-gray-700 px-4 py-2 rounded-lg text-sm text-gray-300 focus:ring-2 focus:ring-blue-500 outline-none w-64"
+                     />
+                 </div>
                  <div className="flex gap-4">
                     <input 
                       type="text" 
@@ -330,12 +355,48 @@ const App = () => {
                      {executionError}
                    </div>
                  )}
-                 {executionResult && (
-                   <div className="mt-4 rounded-xl border border-gray-700 bg-gray-950/70 p-4">
-                     <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Latest Response</p>
-                     <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-gray-300">
-                       {JSON.stringify(executionResult, null, 2)}
-                     </pre>
+                {executionResult && (
+                   <div className={`mt-6 rounded-xl border p-5 ${
+                     executionResult.firewall?.status === 'blocked' 
+                       ? 'border-red-500/50 bg-red-900/10' 
+                       : executionResult.firewall?.status === 'review'
+                         ? 'border-yellow-500/50 bg-yellow-900/10'
+                         : 'border-green-500/50 bg-green-900/10'
+                   }`}>
+                     <div className="flex items-center gap-3 mb-3">
+                       {executionResult.firewall?.status === 'blocked' ? (
+                         <div className="bg-red-500/20 p-3 rounded-full text-red-500"><ShieldAlert size={28} /></div>
+                       ) : executionResult.firewall?.status === 'review' ? (
+                         <div className="bg-yellow-500/20 p-3 rounded-full text-yellow-500"><AlertTriangle size={28} /></div>
+                       ) : (
+                         <div className="bg-green-500/20 p-3 rounded-full text-green-500"><ShieldCheck size={28} /></div>
+                       )}
+                       <div>
+                           <h4 className={`text-xl font-bold ${
+                             executionResult.firewall?.status === 'blocked' 
+                               ? 'text-red-400' 
+                               : executionResult.firewall?.status === 'review'
+                                 ? 'text-yellow-400' 
+                                 : 'text-green-400'
+                           }`}>
+                             {executionResult.firewall?.status === 'blocked' 
+                               ? 'THREAT BLOCKED' 
+                               : executionResult.firewall?.status === 'review'
+                                 ? 'REVIEW REQUIRED'
+                                 : 'PROMPT SAFE'}
+                           </h4>
+                           <span className="text-xs text-gray-400 uppercase tracking-widest font-mono">
+                               Risk Score: {(executionResult.firewall?.risk_score * 100).toFixed(1)}%
+                           </span>
+                       </div>
+                     </div>
+                     <p className="text-sm text-gray-300 p-4 bg-gray-950/50 rounded-lg border border-gray-800">
+                        {executionResult.firewall?.status === 'blocked' 
+                            ? `Security triggered: [${executionResult.firewall.matched_rules?.join(', ')}] ${executionResult.firewall.threats?.join(', ')}` 
+                            : executionResult.firewall?.status === 'review'
+                              ? `Caution: This prompt contains suspicious patterns and has been flagged for manual review.`
+                              : 'No adversarial intent detected. Execution allowed.'}
+                     </p>
                    </div>
                  )}
               </div>

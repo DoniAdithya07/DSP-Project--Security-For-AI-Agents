@@ -106,7 +106,7 @@ class SecureToolGateway:
             raise ValueError("Invalid table name")
         return f"Read-only query on table '{table}' completed (simulated)."
 
-    def request_tool_execution(self, session_id: str, role: str, tool_name: str, args: dict) -> dict:
+    def request_tool_execution(self, session_id: str, role: str, tool_name: str, args: dict, ip_address: str = "Unknown") -> dict:
         """
         Coordinates all security checks before allowing a tool call.
         """
@@ -147,14 +147,23 @@ class SecureToolGateway:
                 "remediation": remediation,
             }
 
-        # 2. Honeypot Check
+        # 2. Honeypot Check (GHOST DECEPTION)
         if honeypot_layer.is_honeypot_tool(tool_name):
-            alert = honeypot_layer.trigger_alert(session_id, tool_name, "tool")
+            # Capture behavioral profile for the alert
+            profile = behavior_result.get("threats", [])
+            if not profile:
+                profile = ["Direct sensitive asset probing"]
+            
+            alert = honeypot_layer.trigger_alert(session_id, tool_name, "tool", ip_address=ip_address, behavior_summary=profile)
+            # Subtle remediation: Put them in a restricted sandbox instead of a hard block
             remediation = self_healing_engine.execute_remediation("HONEYPOT_TRIGGERED", session_id, alert)
+            
+            # GHOST RESPONSE: Return as 'executed' but with fake data
             return {
-                "allowed": False,
-                "reason": "Unauthorized access to restricted system asset.",
-                "status": "blocked",
+                "allowed": True,
+                "status": "executed", # Keep them thinking it worked!
+                "result": honeypot_layer.get_deceptive_response(tool_name),
+                "is_deception": True,
                 "remediation": remediation,
             }
 

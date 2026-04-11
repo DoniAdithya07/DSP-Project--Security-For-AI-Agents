@@ -4,17 +4,19 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .db.config import engine, get_db, Base
 from .models.api import ExecuteRequest
-from .models.schema import AuditLog, SecurityEvent
+from .models.schema import AuditLog, SecurityEvent, AgentIdentity
 from .core.firewall import firewall
 from .core.gateway import secure_gateway
 from .core.healing import self_healing_engine
+from .core.crypto import crypto_manager
+from .core.rate_limit import rate_limiter
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +25,19 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    
+    with Session(engine) as session:
+        if session.query(AgentIdentity).count() == 0:
+            import secrets
+            raw_key = secrets.token_hex(16)
+            hashed = crypto_manager.hash_api_key(raw_key)
+            agent = AgentIdentity(agent_id="admin-agent", role="admin", api_key_hash=hashed)
+            session.add(agent)
+            session.commit()
+            logger.info("="*60)
+            logger.info(f"INITIALIZED FIRST AGENT. ID: admin-agent | SECRET: {raw_key}")
+            logger.info("="*60)
+            
     logger.info("Database initialized")
     yield
 
@@ -46,7 +61,7 @@ def _create_audit_log(
     status: str,
     input_text: str,
     output_text: str,
-    agent_id: str = "agent-001",
+    agent_id: str
 ) -> None:
     db.add(
         AuditLog(
@@ -54,8 +69,9 @@ def _create_audit_log(
             agent_id=agent_id,
             action=action,
             status=status,
-            input_text=input_text,
-            output_text=output_text,
+            # Data-at-Rest Protection
+            input_text=crypto_manager.encrypt_text(input_text),
+            output_text=crypto_manager.encrypt_text(output_text),
         )
     )
 
@@ -68,6 +84,10 @@ def _create_security_event(
     risk_score: float,
     details: Dict[str, Any],
 ) -> None:
+    # Encrypt prompt if present in details
+    if "prompt" in details:
+        details["prompt"] = crypto_manager.encrypt_text(details["prompt"])
+        
     db.add(
         SecurityEvent(
             session_id=session_id,
@@ -76,6 +96,7 @@ def _create_security_event(
             details=details,
         )
     )
+
 
 
 def _infer_tool(prompt: str) -> str:
@@ -97,13 +118,23 @@ def _infer_tool(prompt: str) -> str:
     return "web_search"
 
 
-def verify_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> None:
+def verify_agent(
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_agent_id: Optional[str] = Header(default=None, alias="X-Agent-Id"),
+    db: Session = Depends(get_db)
+) -> AgentIdentity:
+    # 1. Strong Authentication: Validate explicit agent ID mapping
+    if x_api_key and x_agent_id:
+        agent = db.query(AgentIdentity).filter(AgentIdentity.agent_id == x_agent_id, AgentIdentity.is_active == True).first()
+        if agent and crypto_manager.hash_api_key(x_api_key) == agent.api_key_hash:
+            return agent
+            
+    # 2. Legacy Fallback: Using raw SECURITY_API_KEY without Agent-ID (acts as root agent-001)
     required_key = os.getenv("SECURITY_API_KEY")
-    if not required_key:
-        return
-    if x_api_key != required_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
-
+    if required_key and x_api_key == required_key:
+        return AgentIdentity(agent_id="legacy-agent-001", role="researcher")
+        
+    raise HTTPException(status_code=401, detail="Invalid Agent credentials or unauthorized identity.")
 
 @app.get("/")
 async def root():
@@ -111,19 +142,25 @@ async def root():
 
 @app.post("/agent/execute")
 async def execute_task(
+    request: Request,
     payload: Optional[ExecuteRequest] = Body(default=None),
     prompt: Optional[str] = Query(default=None, max_length=4000),
-    role: str = Query(default="researcher"),
     session_id: Optional[str] = Query(default=None, max_length=128),
     db: Session = Depends(get_db),
-    _: None = Depends(verify_api_key),
+    agent: AgentIdentity = Depends(verify_agent),
 ):
+    # Capture client IP for profiling
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    # Enforce Denial-of-Wallet & DoS protection at the Edge
+    rate_limiter.check_rate_limit(agent.agent_id)
+    
     request_payload = payload
     if request_payload is None:
         if prompt is None:
             raise HTTPException(status_code=422, detail="Provide request body or query prompt.")
         try:
-            request_payload = ExecuteRequest(prompt=prompt, role=role, session_id=session_id)
+            request_payload = ExecuteRequest(prompt=prompt, role=agent.role, session_id=session_id)
         except Exception as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -147,7 +184,7 @@ async def execute_task(
                 event_type="FIREWALL_BLOCK",
                 risk_score=float(firewall_result["risk_score"]),
                 details={
-                    "prompt": request_payload.prompt,
+                    "prompt": crypto_manager.encrypt_text(request_payload.prompt),
                     "threats": firewall_result["threats"],
                     "matched_rules": firewall_result.get("matched_rules", []),
                     "remediation": remediation,
@@ -159,7 +196,8 @@ async def execute_task(
                 action="firewall_precheck",
                 status="blocked",
                 input_text=request_payload.prompt,
-                output_text="Security violation detected in prompt.",
+                output_text=f"Blocked: {', '.join(firewall_result['threats'])}",
+                agent_id=agent.agent_id
             )
             db.commit()
             return {
@@ -181,6 +219,7 @@ async def execute_task(
             role=request_payload.role,
             tool_name=selected_tool,
             args=tool_args,
+            ip_address=client_ip,
         )
 
         # 3. Audit logs for all outcomes
@@ -191,6 +230,7 @@ async def execute_task(
             status=gateway_result["status"],
             input_text=request_payload.prompt,
             output_text=gateway_result.get("result") or gateway_result.get("reason", "N/A"),
+            agent_id=agent.agent_id
         )
 
         if gateway_result["status"] == "blocked":
@@ -226,9 +266,26 @@ async def execute_task(
         raise HTTPException(status_code=500, detail="Database failure while processing request.") from exc
 
 @app.get("/logs/security")
-async def get_security_logs(db: Session = Depends(get_db), _: None = Depends(verify_api_key)):
-    return db.query(SecurityEvent).order_by(SecurityEvent.timestamp.desc()).limit(50).all()
+async def get_security_logs(db: Session = Depends(get_db), _: AgentIdentity = Depends(verify_agent)):
+    events = db.query(SecurityEvent).order_by(SecurityEvent.timestamp.desc()).limit(50).all()
+    # Security events might contain prompt snippets in details
+    for event in events:
+        if isinstance(event.details, dict) and "prompt" in event.details:
+            try:
+                event.details["prompt"] = crypto_manager.decrypt_text(event.details["prompt"])
+            except Exception:
+                pass
+    return events
 
 @app.get("/logs/audit")
-async def get_audit_logs(db: Session = Depends(get_db), _: None = Depends(verify_api_key)):
-    return db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(50).all()
+async def get_audit_logs(db: Session = Depends(get_db), _: AgentIdentity = Depends(verify_agent)):
+    logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(50).all()
+    for log in logs:
+        try:
+            log.input_text = crypto_manager.decrypt_text(log.input_text)
+            log.output_text = crypto_manager.decrypt_text(log.output_text)
+        except Exception:
+            # Fallback for old unencrypted or malformed logs
+            pass
+    return logs
+
