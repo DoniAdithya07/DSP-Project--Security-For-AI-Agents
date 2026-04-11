@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, DateTime, Float, Integer, JSON, String, Text
 from ..db.config import Base
 import datetime
 
@@ -19,7 +19,7 @@ class AuditLog(Base):
     session_id = Column(String, index=True)
     agent_id = Column(String)
     action = Column(String)
-    status = Column(String) # ALLOWED, BLOCKED, MODIFIED
-    input_text = Column(String)
-    output_text = Column(String)
+    status = Column(String, index=True) # ALLOWED, BLOCKED, MODIFIED
+    input_text = Column(Text)
+    output_text = Column(Text)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { 
   ShieldCheck, 
@@ -6,7 +6,6 @@ import {
   Activity, 
   Terminal, 
   Lock, 
-  Eye, 
   RefreshCw, 
   AlertTriangle,
   ChevronRight,
@@ -38,16 +37,23 @@ ChartJS.register(
 );
 
 const App = () => {
+  const createSessionId = () => `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const [activeTab, setActiveTab] = useState('dashboard');
   const [prompt, setPrompt] = useState('');
   const [logs, setLogs] = useState([]);
   const [securityEvents, setSecurityEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [executionResult, setExecutionResult] = useState(null);
+  const [executionError, setExecutionError] = useState('');
+  const [sessionId, setSessionId] = useState(() => {
+    const existing = localStorage.getItem('aegismind_session_id');
+    return existing || createSessionId();
+  });
   const [stats, setStats] = useState({
     blocked: 0,
     safe: 0,
     threats: 0,
-    risk: 0.12
+    risk: 0
   });
 
   useEffect(() => {
@@ -56,6 +62,10 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem('aegismind_session_id', sessionId);
+  }, [sessionId]);
+
   const fetchLogs = async () => {
     try {
       const securityRes = await axios.get('/api/logs/security');
@@ -63,12 +73,21 @@ const App = () => {
       setSecurityEvents(securityRes.data);
       setLogs(auditRes.data);
       
-      const blockedCount = auditRes.data.filter(l => l.status === 'blocked' || l.status === 'denied').length;
+      const blockedStatuses = new Set(['blocked', 'denied', 'review']);
+      const safeStatuses = new Set(['executed', 'modified', 'safe']);
+      const blockedCount = auditRes.data.filter(l => blockedStatuses.has((l.status || '').toLowerCase())).length;
+      const safeCount = auditRes.data.filter(l => safeStatuses.has((l.status || '').toLowerCase())).length;
+      const averageRisk = securityRes.data.length > 0
+        ? Math.round(
+            (securityRes.data.reduce((acc, event) => acc + Number(event.risk_score || 0), 0) / securityRes.data.length) * 100
+          )
+        : 0;
+
       setStats({
         blocked: blockedCount,
-        safe: auditRes.data.length - blockedCount,
+        safe: safeCount,
         threats: securityRes.data.length,
-        risk: securityRes.data.length > 0 ? (securityRes.data[0].risk_score * 100).toFixed(0) : 10
+        risk: averageRisk
       });
     } catch (err) {
       console.error("Error fetching logs", err);
@@ -76,31 +95,81 @@ const App = () => {
   };
 
   const executePrompt = async () => {
-    if (!prompt) return;
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) return;
     setLoading(true);
+    setExecutionError('');
     try {
-      await axios.post('/api/agent/execute?prompt=' + encodeURIComponent(prompt));
+      const response = await axios.post('/api/agent/execute', {
+        session_id: sessionId,
+        prompt: trimmedPrompt,
+        role: 'researcher'
+      });
+      if (response?.data?.session_id) {
+        setSessionId(response.data.session_id);
+      }
+      setExecutionResult(response.data);
       setPrompt('');
-      fetchLogs();
+      await fetchLogs();
     } catch (err) {
+      const detail = err?.response?.data?.detail;
+      setExecutionError(Array.isArray(detail) ? detail.map((d) => d?.msg).join(', ') : (detail || err.message || 'Execution failed'));
       console.error("Execution failed", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const chartData = {
-    labels: ['1h ago', '45m ago', '30m ago', '15m ago', '10m ago', '5m ago', 'Now'],
-    datasets: [
-      {
-        label: 'Risk Score',
-        data: [10, 15, 8, 45, 30, 65, stats.risk],
-        borderColor: '#0ea5e9',
-        backgroundColor: 'rgba(14, 165, 233, 0.1)',
-        fill: true,
-        tension: 0.4,
-      },
-    ],
+  const chartData = useMemo(() => {
+    const bucketCount = 7;
+    const bucketSizeMinutes = 10;
+    const nowMs = Date.now();
+    const bucketValues = Array.from({ length: bucketCount }, () => 0);
+
+    securityEvents.forEach((event) => {
+      const eventTime = new Date(event.timestamp).getTime();
+      if (Number.isNaN(eventTime)) return;
+
+      const ageMinutes = (nowMs - eventTime) / (1000 * 60);
+      if (ageMinutes < 0 || ageMinutes > (bucketCount - 1) * bucketSizeMinutes) return;
+
+      const bucketFromNow = Math.floor(ageMinutes / bucketSizeMinutes);
+      const index = bucketCount - 1 - bucketFromNow;
+      if (index < 0 || index >= bucketCount) return;
+
+      const riskPercent = Math.round(Number(event.risk_score || 0) * 100);
+      bucketValues[index] = Math.max(bucketValues[index], riskPercent);
+    });
+
+    const labels = Array.from({ length: bucketCount }, (_, idx) => {
+      const minutesAgo = (bucketCount - 1 - idx) * bucketSizeMinutes;
+      return minutesAgo === 0 ? 'Now' : `${minutesAgo}m ago`;
+    });
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Risk Score',
+          data: bucketValues,
+          borderColor: '#0ea5e9',
+          backgroundColor: 'rgba(14, 165, 233, 0.1)',
+          fill: true,
+          tension: 0.4,
+        },
+      ],
+    };
+  }, [securityEvents]);
+
+  const getAlertMessage = (event) => {
+    if (!event?.details) return 'Security policy violation detected';
+    return (
+      event.details.reason ||
+      event.details.threats?.[0] ||
+      event.details.prompt ||
+      event.details.tool ||
+      'Security policy violation detected'
+    );
   };
 
   return (
@@ -218,7 +287,7 @@ const App = () => {
                              <span className="text-xs font-bold text-red-500">{event.event_type}</span>
                              <span className="text-[10px] text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
                           </div>
-                          <p className="text-xs text-gray-300 truncate">{event.details.threats?.[0] || 'Behavioral Anomaly Detected'}</p>
+                          <p className="text-xs text-gray-300 truncate">{getAlertMessage(event)}</p>
                        </div>
                      ))}
                   </div>
@@ -256,6 +325,19 @@ const App = () => {
                       <button key={ex} onClick={() => setPrompt(ex)} className="text-[10px] bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded transition-colors uppercase font-medium">{ex}</button>
                     ))}
                  </div>
+                 {executionError && (
+                   <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                     {executionError}
+                   </div>
+                 )}
+                 {executionResult && (
+                   <div className="mt-4 rounded-xl border border-gray-700 bg-gray-950/70 p-4">
+                     <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Latest Response</p>
+                     <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-gray-300">
+                       {JSON.stringify(executionResult, null, 2)}
+                     </pre>
+                   </div>
+                 )}
               </div>
             </div>
           )}
@@ -278,15 +360,21 @@ const App = () => {
                     </thead>
                     <tbody className="text-sm divide-y divide-gray-800">
                        {logs.map((log, i) => (
-                         <tr key={i} className="hover:bg-gray-900/30 transition-colors">
+                       <tr key={i} className="hover:bg-gray-900/30 transition-colors">
                             <td className="px-6 py-4 text-xs text-gray-500 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
                             <td className="px-6 py-4"><span className="font-mono text-blue-400 bg-blue-400/5 px-2 py-0.5 rounded capitalize">{log.action}</span></td>
                             <td className="px-6 py-4">
+                              {(() => {
+                                const normalizedStatus = (log.status || '').toLowerCase();
+                                const isSafe = ['executed', 'modified', 'safe'].includes(normalizedStatus);
+                                return (
                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                  log.status === 'executed' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                                  isSafe ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
                                }`}>
                                   {log.status}
                                </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-6 py-4 max-w-xs truncate text-gray-400">{log.input_text}</td>
                             <td className="px-6 py-4 max-w-xs truncate italic text-gray-500">{log.output_text}</td>

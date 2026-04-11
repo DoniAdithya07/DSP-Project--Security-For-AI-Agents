@@ -1,71 +1,105 @@
-import re
 import base64
+import re
+from typing import Any, Dict, List
+
 
 class PromptFirewall:
     def __init__(self):
-        # Heuristic rules for common injection attacks
-        self.injection_patterns = [
-            r"(?i)ignore\s+previous\s+instructions",
-            r"(?i)system\s+prompt",
-            r"(?i)reveal\s+hidden",
-            r"(?i)not\s+restricted",
-            r"(?i)pretend\s+you\s+are",
-            r"(?i)start\s+acting\s+as",
-            r"(?i)forget\s+all\s+rules",
-            r"(?i)override\s+policy",
-            r"(?i)sudo\s+access",
-            r"(?i)bypass\s+security",
-            r"(?i)cat\s+/etc/passwd", # Command injection example
-            r"(?i)rm\s+-rf",          # Destructive command example
+        # Scoring-based rules: id, regex, human-readable reason, score contribution
+        self.rulebook = [
+            ("prompt_override", re.compile(r"(?i)\b(ignore|disregard)\s+(all\s+)?(previous|prior)\s+instructions\b"), "Prompt override attempt", 0.85),
+            ("system_prompt_exfil", re.compile(r"(?i)\bsystem\s+prompt\b"), "System prompt exfiltration attempt", 0.85),
+            ("hidden_instruction_exfil", re.compile(r"(?i)\breveal\s+hidden\b"), "Hidden instruction exfiltration attempt", 0.75),
+            ("role_manipulation", re.compile(r"(?i)\b(as an?|act as|pretend to be|switch to|you are now(?: in)?|from now on you are)\s+(?:the\s+)?(admin|developer|root|system)\b"), "Role manipulation attempt", 0.85),
+            ("policy_bypass", re.compile(r"(?i)\b(override|bypass|disable|ignore)\s+(policy(?:\s+engine)?|guardrails|security|firewall)\b"), "Policy bypass attempt", 0.80),
+            ("secret_exfiltration", re.compile(r"(?i)\b(show|reveal|get|dump)\b.{0,30}\b(secret|secrets|credentials|keys|tokens)\b"), "Sensitive secret exfiltration attempt", 0.85),
+            ("destructive_db", re.compile(r"(?i)\bdrop\s+(database|table)\b"), "Destructive database intent", 0.80),
+            ("destructive_shell", re.compile(r"(?i)\brm\s+-rf\b|\bcat\s+/etc/passwd\b"), "Destructive shell payload", 1.0),
+            ("encoded_instruction_execution", re.compile(r"(?i)\bdecode\b.*\bbase64\b|\bbase64\b.*\bdecode\b"), "Encoded instruction execution attempt", 0.80),
+            ("indirect_injection", re.compile(r"(?i)\b(from|inside|in)\s+(website|pdf|email|api|attachment|document)\b.{0,80}\b(ignore|override|bypass|reveal)\b"), "Indirect prompt injection pattern", 0.70),
         ]
-        
-        # Patterns for encoded attacks
-        self.base64_pattern = r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
+
+        self.base64_blob_pattern = re.compile(r"\b(?:[A-Za-z0-9+/]{4}){6,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\b")
+        self.decoded_malicious_markers = [
+            re.compile(r"(?i)\bignore\s+previous\s+instructions\b"),
+            re.compile(r"(?i)\bsystem\s+prompt\b"),
+            re.compile(r"(?i)\broot\s+credentials\b"),
+            re.compile(r"(?i)\bdrop\s+table\b"),
+            re.compile(r"(?i)\brm\s+-rf\b"),
+            re.compile(r"(?i)\bbypass\s+security\b"),
+        ]
+        self.block_threshold = 0.70
+        self.review_threshold = 0.45
+
+    def _analyze_base64(self, prompt: str) -> Dict[str, Any]:
+        findings: List[str] = []
+        matched_rules: List[str] = []
+        score = 0.0
+
+        for candidate in self.base64_blob_pattern.findall(prompt):
+            # Base64 data length must be a multiple of 4
+            if len(candidate) % 4 != 0:
+                continue
+            try:
+                decoded = base64.b64decode(candidate, validate=True).decode("utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            for marker in self.decoded_malicious_markers:
+                if marker.search(decoded):
+                    findings.append("Malicious payload detected in Base64 content")
+                    matched_rules.append("base64_decoded_malicious")
+                    score += 0.85
+                    return {"score": score, "findings": findings, "rules": matched_rules}
+
+        return {"score": score, "findings": findings, "rules": matched_rules}
 
     def scan(self, prompt: str) -> dict:
         """
-        Analyzes a prompt for potential security risks.
-        Returns a risk score and identified threats.
+        Analyze prompt risk and return structured decision details.
         """
-        threats_found = []
+        normalized_prompt = (prompt or "").strip()
+        threats_found: List[str] = []
+        matched_rules: List[str] = []
         risk_score = 0.0
 
-        # Check for direct injection patterns
-        for pattern in self.injection_patterns:
-            if re.search(pattern, prompt):
-                threats_found.append(f"Prompt Injection Pattern Detected: {pattern}")
-                risk_score += 0.4
+        for rule_id, pattern, reason, weight in self.rulebook:
+            if pattern.search(normalized_prompt):
+                matched_rules.append(rule_id)
+                threats_found.append(reason)
+                risk_score += weight
 
-        # Check for abnormal length (can be used in DoS)
-        if len(prompt) > 2000:
-            threats_found.append("Excessive Prompt Length")
-            risk_score += 0.2
+        # Long prompts increase uncertainty and abuse risk
+        if len(normalized_prompt) > 4000:
+            matched_rules.append("oversized_prompt")
+            threats_found.append("Excessive prompt length")
+            risk_score += 0.25
 
-        # Check for Base64 encoded blobs (can hide malicious payloads)
-        # We only flag if it's long enough to be suspicious
-        if len(prompt) > 20 and re.search(self.base64_pattern, prompt):
-            try:
-                # Attempt to decode a piece to see if it looks like a command or instruction
-                # (Simple heuristic: if it decodes to ASCII, it's suspicious)
-                # In a real system, we'd scan the decoded content too
-                pass
-            except:
-                pass
+        b64_result = self._analyze_base64(normalized_prompt)
+        risk_score += b64_result["score"]
+        threats_found.extend(b64_result["findings"])
+        matched_rules.extend(b64_result["rules"])
 
-        # Check for role override attempts
-        if "as an admin" in prompt.lower() or "with full access" in prompt.lower():
-            threats_found.append("Role Override Attempt")
-            risk_score += 0.3
-
-        # Normalize risk score to max 1.0
         risk_score = min(risk_score, 1.0)
-        
+        if risk_score >= self.block_threshold:
+            decision = "block"
+            status = "blocked"
+        elif risk_score >= self.review_threshold:
+            decision = "review"
+            status = "review"
+        else:
+            decision = "allow"
+            status = "safe"
+
+        # Preserve stable response shape for existing callers while adding richer context
         return {
-            "is_blocked": risk_score >= 0.7,
-            "risk_score": risk_score,
-            "threats": threats_found,
-            "status": "blocked" if risk_score >= 0.7 else "safe"
+            "is_blocked": decision == "block",
+            "status": status,
+            "decision": decision,
+            "risk_score": round(risk_score, 4),
+            "threats": sorted(set(threats_found)),
+            "matched_rules": sorted(set(matched_rules)),
         }
 
-# Singleton instance
+
 firewall = PromptFirewall()
