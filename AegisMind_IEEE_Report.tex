@@ -1,0 +1,280 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{url}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\title{AegisMind: A Defense-in-Depth Security Framework for Agentic AI Workflows}
+
+\author{
+\IEEEauthorblockN{A. Doni Adithya, E. Hari Teja, Hari Prasad L., L. Sahith Akash Manikanta}
+\IEEEauthorblockA{
+Registration Numbers: 23bds007, 23bds019, 23bds022, 23bds031 \\
+Course: Data Security and Privacy (DS-208) \\
+Professor: Dr Girish Revadigar
+}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Agentic AI systems combine natural language reasoning with external tool calls, data access, and multi-step decision workflows. While this improves automation, it expands the attack surface to prompt injection, role manipulation, encoded instruction bypass, unsafe tool chaining, and sensitive data leakage. This project presents \textit{AegisMind}, a FastAPI-based security framework that enforces defense-in-depth before any tool execution. The framework integrates a three-tier prompt firewall (rule-based, machine learning, and LLM-assisted reasoning), role-aware policy controls, strict allow-listed tool mediation, output Data Leakage Prevention (DLP), behavioral anomaly detection, adaptive self-healing, and encrypted auditability. A React dashboard provides real-time visibility of threats, risk trends, and execution decisions. Experimental validation through automated tests and adversarial prompt demonstrations shows reliable blocking of high-risk inputs while maintaining safe path execution for benign requests.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Agentic AI security, prompt injection defense, policy engine, DLP, honeypot deception, adaptive remediation, secure tool execution.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Large Language Models (LLMs) are rapidly evolving into agentic systems that can select and execute tools, query databases, and orchestrate workflows. This capability creates practical security and privacy risks when untrusted natural language becomes a control plane. Traditional single-layer filtering is often insufficient against adversarial prompt engineering and semantic bypass attempts. 
+
+To address this, we designed \textbf{AegisMind}, a layered runtime security framework for AI agent execution. Instead of relying on one detector, AegisMind combines multiple controls from input risk analysis to output sanitization and auditing. The project was implemented as part of \textbf{Data Security and Privacy (DS-208)}.
+
+\section{Problem Definition and Threat Model}
+\subsection{Problem Statement}
+Given a user prompt and optional tool request, the system must safely determine whether the request should be allowed, modified, reviewed, or blocked, while preserving confidentiality, integrity, and availability.
+
+\subsection{Threat Assumptions}
+The adversary can:
+\begin{itemize}
+    \item Submit direct prompt injection or role-override prompts.
+    \item Use encoded payloads (for example, Base64) to hide intent.
+    \item Probe restricted tools repeatedly for escalation.
+    \item Attempt data exfiltration through model output.
+    \item Trigger excessive request rates to degrade service.
+\end{itemize}
+
+\subsection{Security Goals}
+\begin{itemize}
+    \item Detect and block prompt-level adversarial intent.
+    \item Enforce role-based and risk-based tool authorization.
+    \item Prevent sensitive output leakage through DLP.
+    \item Maintain end-to-end forensic visibility and explainability.
+    \item Adaptively contain repeated or high-confidence attacks.
+\end{itemize}
+
+\section{System Architecture}
+\subsection{Execution Pipeline}
+The high-level request flow in AegisMind is:
+\begin{enumerate}
+    \item Client request enters \texttt{/agent/execute}.
+    \item Agent identity and API credentials are validated.
+    \item Per-agent rate limiting is enforced.
+    \item Prompt Firewall returns \texttt{safe/review/blocked}.
+    \item If not blocked, tool intent is inferred or directly selected.
+    \item Secure Tool Gateway applies policy, behavior, and deception checks.
+    \item Tool output passes through DLP masking/blocking.
+    \item Response and decision metadata are logged.
+\end{enumerate}
+
+\subsection{Core Modules}
+\begin{itemize}
+    \item Prompt Firewall
+    \item Policy Engine
+    \item Secure Tool Gateway
+    \item DLP Module
+    \item Behavioral Threat Detector
+    \item Self-Healing Engine
+    \item Honeypot Deception Layer
+    \item Rate Limiter and Encrypted Logging
+\end{itemize}
+
+\section{Implementation}
+\subsection{Backend and API}
+The backend is built using FastAPI and SQLAlchemy. Main endpoints:
+\begin{itemize}
+    \item \texttt{POST /agent/execute}
+    \item \texttt{GET /logs/security}
+    \item \texttt{GET /logs/audit}
+\end{itemize}
+
+Authentication supports:
+\begin{itemize}
+    \item \texttt{X-API-Key} + \texttt{X-Agent-Id} mapped to hashed identities.
+    \item Optional legacy fallback through \texttt{SECURITY\_API\_KEY}.
+\end{itemize}
+
+\subsection{Prompt Firewall}
+The firewall is a three-tier design:
+\begin{enumerate}
+    \item \textbf{Rule-based layer}: regex signatures for injection, jailbreak, role manipulation, command intent, and exfiltration patterns.
+    \item \textbf{ML layer}: semantic risk scoring via TF-IDF + Logistic Regression.
+    \item \textbf{LLM layer}: reasoning-based classification of gray-zone prompts.
+\end{enumerate}
+
+Current risk thresholds:
+\begin{itemize}
+    \item Review threshold: 0.30
+    \item Block threshold: 0.60
+\end{itemize}
+
+\subsection{Policy Engine}
+The policy layer enforces role-wise tool access, global deny lists, risk budgets, and unsafe tool chains. Table~\ref{tab:roles} summarizes role budgets.
+
+\begin{table}[h]
+\centering
+\caption{Role Policy and Risk Budgets}
+\label{tab:roles}
+\begin{tabular}{lll}
+\toprule
+\textbf{Role} & \textbf{Representative Allowed Tools} & \textbf{Max Risk} \\
+\midrule
+researcher & web\_search, calculator, summarizer & 0.35 \\
+support & customer\_lookup, issue\_tracker, summarizer & 0.45 \\
+admin & all above + db\_read & 0.75 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Secure Tool Gateway}
+Tool execution is mediated through strict controls:
+\begin{itemize}
+    \item Tool and argument schema validation.
+    \item Allow-listed handlers only.
+    \item Pre-execution behavior analysis.
+    \item Policy decision enforcement.
+    \item Post-execution DLP scan.
+\end{itemize}
+
+No arbitrary shell execution pathway is exposed.
+
+\subsection{Data Leakage Prevention}
+The DLP module scans output for high-risk patterns such as API keys, passwords, private key blocks, bearer tokens, and financial/PII patterns. Findings are masked. Critical findings trigger blocking.
+
+\subsection{Behavioral and Adaptive Controls}
+Session-level behavioral analysis detects:
+\begin{itemize}
+    \item Excessive invocation velocity
+    \item Sensitive tool chaining
+    \item Repeated probing behavior
+\end{itemize}
+
+The self-healing layer responds with:
+\begin{itemize}
+    \item \texttt{TEMP\_COOLDOWN}
+    \item \texttt{RESTRICTED\_MODE}
+    \item \texttt{CRITICAL\_LOCKDOWN}
+\end{itemize}
+
+\subsection{Honeypot Deception}
+Sensitive fake tools are instrumented as honeypots. Triggering them returns deceptive responses while raising high-priority security events for incident tracking.
+
+\subsection{Encryption and Auditability}
+Database entities include \texttt{agent\_identities}, \texttt{security\_events}, and \texttt{audit\_logs}. Prompt and output text fields are encrypted (Fernet), and API keys are stored as SHA-256 hashes.
+
+\section{Frontend Monitoring Dashboard}
+The React-based interface provides:
+\begin{itemize}
+    \item Security playground for prompt testing
+    \item Master key and session persistence
+    \item Threat and risk metrics visualization
+    \item Live security alerts
+    \item Audit stream table
+\end{itemize}
+
+This improves operational visibility for demonstration and debugging.
+
+\section{Deployment and Runtime Configuration}
+The system is containerized via Docker Compose with:
+\begin{itemize}
+    \item PostgreSQL
+    \item Backend API
+    \item Redis
+    \item Frontend (Vite)
+\end{itemize}
+
+Default interfaces:
+\begin{itemize}
+    \item Frontend: \texttt{http://localhost:5173}
+    \item Backend: \texttt{http://localhost:8000}
+    \item Docs: \texttt{http://localhost:8000/docs}
+\end{itemize}
+
+Important environment variables include \texttt{SECURITY\_API\_KEY}, \texttt{ENCRYPTION\_KEY}, \texttt{CORS\_ALLOW\_ORIGINS}, \texttt{LLM\_PROVIDER}, and Redis settings.
+
+\section{Experimental Evaluation}
+\subsection{Method}
+Evaluation included:
+\begin{enumerate}
+    \item Automated backend test execution with \texttt{pytest}.
+    \item Adversarial prompt scenarios from UI and API.
+    \item Log verification for decision traceability.
+\end{enumerate}
+
+\subsection{Observed Test Snapshot}
+In the latest run:
+\begin{itemize}
+    \item Total tests: 16
+    \item Passed: 13
+    \item Failed: 3
+\end{itemize}
+
+The failed cases were primarily related to test assumptions and rate-limit state interactions, indicating test isolation improvements are needed. Core blocking behaviors for major attack categories were validated.
+
+\subsection{Demonstrated Scenarios}
+\begin{itemize}
+    \item Safe prompt path execution
+    \item Prompt injection blocking
+    \item Role manipulation blocking
+    \item Base64 attack intent blocking
+    \item Unauthorized tool denial
+    \item DLP-based output blocking
+\end{itemize}
+
+\section{Discussion}
+AegisMind demonstrates that layered controls produce stronger practical resilience than a single detector. Rule-based checks provide deterministic speed, ML captures semantic cues, and LLM reasoning helps in ambiguous cases. Policy and gateway layers constrain blast radius even if upstream analysis is uncertain.
+
+\section{Limitations}
+\begin{itemize}
+    \item LLM-assisted evaluation depends on external model availability and latency.
+    \item Synthetic data in ML training may not cover all emerging attack phrasing.
+    \item Ephemeral encryption fallback is not ideal for persistent environments.
+    \item Test suite needs stronger deterministic reset procedures.
+\end{itemize}
+
+\section{Future Work}
+\begin{itemize}
+    \item Integrate production key management (Vault/KMS).
+    \item Add SIEM/webhook export for enterprise monitoring.
+    \item Expand adversarial benchmarks and load testing.
+    \item Improve human-in-the-loop escalation workflows.
+    \item Extend dashboard with advanced policy management views.
+\end{itemize}
+
+\section{Conclusion}
+This project presents AegisMind, a practical defense-in-depth framework for securing agentic AI execution. By combining prompt risk analysis, policy enforcement, secure tool mediation, DLP, adaptive remediation, and encrypted observability, the system significantly improves runtime trust and control. The implementation aligns with DS-208 goals by translating data security and privacy principles into an operational, testable architecture.
+
+\section*{Acknowledgment}
+This work was completed for the course \textbf{Data Security and Privacy (DS-208)} under the guidance of \textbf{Dr Girish Revadigar}.
+
+\begin{thebibliography}{99}
+\bibitem{fastapi}
+FastAPI Documentation. [Online]. Available: \url{https://fastapi.tiangolo.com/}
+
+\bibitem{sqlalchemy}
+SQLAlchemy Documentation. [Online]. Available: \url{https://docs.sqlalchemy.org/}
+
+\bibitem{redis}
+Redis Documentation. [Online]. Available: \url{https://redis.io/docs/}
+
+\bibitem{docker}
+Docker Documentation. [Online]. Available: \url{https://docs.docker.com/}
+
+\bibitem{sklearn}
+Scikit-learn Documentation. [Online]. Available: \url{https://scikit-learn.org/stable/}
+
+\bibitem{pydantic}
+Pydantic Documentation. [Online]. Available: \url{https://docs.pydantic.dev/}
+
+\bibitem{cryptography}
+Cryptography (Fernet) Documentation. [Online]. Available: \url{https://cryptography.io/}
+
+\bibitem{owasp}
+OWASP Top 10 for LLM Applications Project. [Online]. Available: \url{https://owasp.org/www-project-top-10-for-large-language-model-applications/}
+\end{thebibliography}
+
+\end{document}

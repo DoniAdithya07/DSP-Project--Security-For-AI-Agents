@@ -227,9 +227,10 @@ const App = () => {
               <span className="text-xs font-semibold text-gray-400">CORE STATUS</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-sm font-medium">Heuristics Active</span>
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+              <span className="text-sm font-medium">Local Llama3 Active</span>
             </div>
+            <div className="mt-2 text-[10px] text-gray-500 font-mono">OFFLINE FIRST MODE</div>
           </div>
         </div>
       </aside>
@@ -390,14 +391,38 @@ const App = () => {
                            </span>
                        </div>
                      </div>
-                     <p className="text-sm text-gray-300 p-4 bg-gray-950/50 rounded-lg border border-gray-800">
-                        {executionResult.firewall?.status === 'blocked' 
-                            ? `Security triggered: [${executionResult.firewall.matched_rules?.join(', ')}] ${executionResult.firewall.threats?.join(', ')}` 
-                            : executionResult.firewall?.status === 'review'
-                              ? `Caution: This prompt contains suspicious patterns and has been flagged for manual review.`
-                              : 'No adversarial intent detected. Execution allowed.'}
-                     </p>
-                   </div>
+                      <p className="text-sm text-gray-300 p-4 bg-gray-950/50 rounded-lg border border-gray-800">
+                         {executionResult.firewall?.status === 'blocked' 
+                             ? `Security triggered: [${executionResult.firewall.matched_rules?.join(', ')}] ${executionResult.firewall.threats?.join(', ')}` 
+                             : executionResult.firewall?.status === 'review'
+                               ? `Caution: This prompt contains suspicious patterns and has been flagged for manual review.`
+                               : 'No adversarial intent detected. Execution allowed.'}
+                      </p>
+                      
+                      {executionResult.gateway?.agent_thought && (
+                        <div className="mt-4 space-y-3">
+                           <div className="flex items-start gap-2 text-xs text-blue-400 bg-blue-400/5 p-3 rounded-lg border border-blue-400/20">
+                             <Activity size={14} className="mt-0.5" />
+                             <div>
+                               <span className="font-bold uppercase tracking-wider block mb-1">Agent Reasoning:</span>
+                               {executionResult.gateway.agent_thought}
+                             </div>
+                           </div>
+
+                           {executionResult.gateway?.agent_response && (
+                             <div className="flex items-start gap-3 text-sm text-gray-200 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-inner">
+                               <div className="w-8 h-8 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center text-white">
+                                  <ShieldCheck size={18} />
+                               </div>
+                               <div>
+                                 <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1">AegisMind Response</span>
+                                 {executionResult.gateway.agent_response}
+                               </div>
+                             </div>
+                           )}
+                        </div>
+                      )}
+                    </div>
                  )}
               </div>
             </div>

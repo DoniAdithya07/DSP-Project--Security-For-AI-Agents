@@ -31,3 +31,10 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Databases
+*.db
+*.sqlite3
+
+# Scratch
+scratch/

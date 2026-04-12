@@ -17,6 +17,7 @@ from .core.gateway import secure_gateway
 from .core.healing import self_healing_engine
 from .core.crypto import crypto_manager
 from .core.rate_limit import rate_limiter
+from .core.agent_reasoner import agent_reasoner
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -99,23 +100,7 @@ def _create_security_event(
 
 
 
-def _infer_tool(prompt: str) -> str:
-    lowered = prompt.lower()
-    if "calculate" in lowered or "math" in lowered:
-        return "calculator"
-    if "customer" in lowered and "lookup" in lowered:
-        return "customer_lookup"
-    if "issue" in lowered and "ticket" in lowered:
-        return "issue_tracker"
-    if "summarize" in lowered or "summary" in lowered:
-        return "summarizer"
-    if "db" in lowered and "read" in lowered:
-        return "db_read"
-    if "root" in lowered or "credentials" in lowered:
-        return "get_root_credentials"
-    if "db" in lowered or "table" in lowered:
-        return "db_admin"
-    return "web_search"
+# Removed _infer_tool: Now using AgentReasoner for LLM-driven inference.
 
 
 def verify_agent(
@@ -212,24 +197,49 @@ async def execute_task(
             }
 
         # 2. Tool selection and secure gateway evaluation
-        selected_tool = request_payload.requested_tool or _infer_tool(request_payload.prompt)
-        tool_args = request_payload.tool_args or {"query": request_payload.prompt}
-        gateway_result = secure_gateway.request_tool_execution(
-            session_id=session_id,
-            role=request_payload.role,
-            tool_name=selected_tool,
-            args=tool_args,
-            ip_address=client_ip,
-        )
+        reasoning = {"tool_name": request_payload.requested_tool, "args": request_payload.tool_args, "thought": "Manually requested."}
+        
+        if not request_payload.requested_tool:
+            reasoning = agent_reasoner.infer_tool(request_payload.prompt, agent.role)
+            
+        selected_tool = reasoning["tool_name"]
+        tool_args = reasoning["args"] or {"query": request_payload.prompt}
+        
+        gateway_result = {"status": "executed", "result": "Direct conversation requested."}
+        
+        if selected_tool != "none":
+            gateway_result = secure_gateway.request_tool_execution(
+                session_id=session_id,
+                role=request_payload.role,
+                tool_name=selected_tool,
+                args=tool_args,
+                ip_address=client_ip,
+            )
+        
+        # 3. Conversational Synthesis (The "Agent Heart")
+        agent_answer = "Execution completed."
+        if gateway_result["status"] in ["executed", "modified"]:
+            # If no tool was used, provide a direct answer. 
+            # If a tool was used, synthesize the answer based on the result.
+            context_data = gateway_result.get("result", "Done") if selected_tool != "none" else "Direct conversation."
+            agent_answer = agent_reasoner.synthesize_response(
+                request_payload.prompt, 
+                context_data, 
+                reasoning.get("thought", "N/A")
+            )
+        
+        # Attach details for the UI
+        gateway_result["agent_thought"] = reasoning.get("thought", "Static analysis")
+        gateway_result["agent_response"] = agent_answer
 
-        # 3. Audit logs for all outcomes
+        # 4. Audit logs for all outcomes
         _create_audit_log(
             db,
             session_id=session_id,
             action=selected_tool,
             status=gateway_result["status"],
             input_text=request_payload.prompt,
-            output_text=gateway_result.get("result") or gateway_result.get("reason", "N/A"),
+            output_text=agent_answer, # Log the final synthesized answer
             agent_id=agent.agent_id
         )
 

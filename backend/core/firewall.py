@@ -142,6 +142,10 @@ class PromptFirewall:
                 matched_rules.append("llm_reasoning_threat")
                 threats_found.append(f"LLM Cognitive Security failure: {llm_result['reason']} (Confidence: {llm_result['confidence']:.2f})")
                 risk_score = 1.0
+            elif not llm_result["is_malicious"] and llm_result["confidence"] >= 0.80:
+                # DE-ESCALATION: LLM confirms this is a benign, safe prompt. 
+                # We trust the high-confidence reasoning of Llama3 over Tier 1/2 suspicions.
+                risk_score = risk_score * 0.2 # Drastically reduce the score
 
         # Final verdict
         risk_score = min(risk_score, 1.0)
