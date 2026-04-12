@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class AgentReasoner:
     def __init__(self):
-        self.provider = os.environ.get("LLM_PROVIDER", "ollama")
+        self.provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
         self.ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.environ.get("OLLAMA_MODEL", "llama3")
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -61,7 +61,9 @@ class AgentReasoner:
                 }
         except Exception as e:
             logger.error(f"Ollama Reasoner Error: {e}")
-            return {"tool_name": "web_search", "args": {"query": prompt}, "thought": "Fallback due to error."}
+            fallback = self._keyword_fallback(prompt)
+            fallback["thought"] = "Secure fallback reasoning mode is active."
+            return fallback
 
     def _reason_gemini(self, system_prompt: str, prompt: str) -> Dict[str, Any]:
         # Fallback to simple keyword inference if Gemini reasoning fails or key is missing
@@ -98,11 +100,12 @@ class AgentReasoner:
         )
 
         if self.provider == "ollama":
-            return self._synthesize_ollama(system_instruction, user_context)
+            response = self._synthesize_ollama(system_instruction, user_context)
+            return response if response else self._fallback_synthesis(prompt, tool_result)
         else:
-            return f"Answer based on data: {tool_result}"
+            return self._fallback_synthesis(prompt, tool_result)
 
-    def _synthesize_ollama(self, system_instruction: str, context: str) -> str:
+    def _synthesize_ollama(self, system_instruction: str, context: str) -> Optional[str]:
         url = f"{self.ollama_base_url}/api/chat"
         payload = {
             "model": self.ollama_model,
@@ -120,6 +123,14 @@ class AgentReasoner:
                 return data.get("message", {}).get("content", "I processed your request but couldn't generate a summary.")
         except Exception as e:
             logger.error(f"Ollama Synthesis Error: {e}")
-            return "Local reasoning engine error. Please check Ollama connectivity."
+            return None
+
+    def _fallback_synthesis(self, prompt: str, tool_result: str) -> str:
+        normalized_result = str(tool_result or "").strip()
+        if normalized_result and normalized_result not in {"Done", "Direct conversation."}:
+            if len(normalized_result) > 600:
+                return normalized_result[:600] + "..."
+            return normalized_result
+        return f"I processed your request in fallback mode. Prompt received: {prompt}"
 
 agent_reasoner = AgentReasoner()

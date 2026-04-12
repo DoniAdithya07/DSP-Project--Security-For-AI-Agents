@@ -146,6 +146,14 @@ class PromptFirewall:
                 # DE-ESCALATION: LLM confirms this is a benign, safe prompt. 
                 # We trust the high-confidence reasoning of Llama3 over Tier 1/2 suspicions.
                 risk_score = risk_score * 0.2 # Drastically reduce the score
+            elif (
+                not llm_result["is_malicious"]
+                and float(llm_result.get("confidence", 0.0)) == 0.0
+                and not matched_rules
+                and risk_score < 0.40
+                and len(normalized_prompt) <= 32
+            ):
+                risk_score = risk_score * 0.2
 
         # Final verdict
         risk_score = min(risk_score, 1.0)

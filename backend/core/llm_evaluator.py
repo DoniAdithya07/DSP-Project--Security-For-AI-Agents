@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class LLMReasoningEvaluator:
     def __init__(self):
-        self.provider = "mock"
+        self.provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
         self.ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.environ.get("OLLAMA_MODEL", "llama3")

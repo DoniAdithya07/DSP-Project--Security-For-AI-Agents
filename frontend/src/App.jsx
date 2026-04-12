@@ -119,10 +119,29 @@ const App = () => {
         prompt: trimmedPrompt,
         role: 'researcher'
       }, { headers: getHeaders() });
+      const responseData = response?.data;
       if (response?.data?.session_id) {
         setSessionId(response.data.session_id);
       }
-      setExecutionResult(response.data);
+
+      if (responseData?.firewall) {
+        const localEvent = {
+          timestamp: new Date().toISOString(),
+          event_type:
+            responseData.firewall.status === 'blocked'
+              ? 'FIREWALL_BLOCK'
+              : responseData.firewall.status === 'review'
+                ? 'FIREWALL_REVIEW'
+                : 'PROMPT_EVAL',
+          risk_score: Number(responseData.firewall.risk_score || 0),
+          details: {
+            reason: responseData.gateway?.reason || responseData.firewall.decision || 'Prompt evaluated'
+          }
+        };
+        setSecurityEvents((previous) => [localEvent, ...previous].slice(0, 50));
+      }
+
+      setExecutionResult(responseData);
       setPrompt('');
       await fetchLogs();
     } catch (err) {
@@ -175,6 +194,44 @@ const App = () => {
     };
   }, [securityEvents]);
 
+  const hasRiskTimelineData = useMemo(() => {
+    return chartData.datasets?.[0]?.data?.some((value) => Number(value) > 0) || false;
+  }, [chartData]);
+
+  const chartOptions = useMemo(() => {
+    return {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: '#94a3b8'
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => `Risk Score: ${context.parsed.y}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b' },
+          grid: { color: 'rgba(30, 41, 59, 0.35)' }
+        },
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            stepSize: 20,
+            color: '#64748b',
+            callback: (value) => `${value}%`
+          },
+          grid: { color: 'rgba(30, 41, 59, 0.35)' }
+        }
+      }
+    };
+  }, []);
+
   const getAlertMessage = (event) => {
     if (!event?.details) return 'Security policy violation detected';
     return (
@@ -184,6 +241,15 @@ const App = () => {
       event.details.tool ||
       'Security policy violation detected'
     );
+  };
+
+  const getDisplayReasoning = (thought) => {
+    const normalizedThought = String(thought || '').trim();
+    if (!normalizedThought) return 'Secure reasoning completed.';
+    if (normalizedThought.toLowerCase().includes('ollama unavailable')) {
+      return 'Secure fallback reasoning mode is active.';
+    }
+    return normalizedThought;
   };
 
   return (
@@ -284,8 +350,13 @@ const App = () => {
                        <option>Last 24 Hours</option>
                     </select>
                   </div>
-                  <div className="h-64">
-                    <Line data={chartData} options={{ maintainAspectRatio: false }} />
+                  <div className="h-64 relative">
+                    <Line data={chartData} options={chartOptions} />
+                    {!hasRiskTimelineData && (
+                      <div className="absolute inset-0 rounded-lg border border-dashed border-gray-700 bg-gray-950/30 flex items-center justify-center pointer-events-none">
+                        <p className="text-sm text-gray-500 italic">No anomaly signals in the selected window.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -405,7 +476,7 @@ const App = () => {
                              <Activity size={14} className="mt-0.5" />
                              <div>
                                <span className="font-bold uppercase tracking-wider block mb-1">Agent Reasoning:</span>
-                               {executionResult.gateway.agent_thought}
+                               {getDisplayReasoning(executionResult.gateway.agent_thought)}
                              </div>
                            </div>
 

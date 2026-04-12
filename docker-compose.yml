@@ -19,6 +19,9 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://aegisuser:aegispassword@db:5432/aegismind
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
     depends_on:
       - db
 
