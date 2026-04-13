@@ -105,3 +105,57 @@ body {
   --tw-shadow-color: rgba(59, 95, 155, 0.28) !important;
   --tw-shadow: var(--tw-shadow-colored) !important;
 }
+
+/* Enforce blue/black/white palette across remaining utility colors */
+.bg-gray-950\/50,
+.bg-gray-900,
+.bg-gray-900\/50,
+.bg-gray-900\/40,
+.hover\:bg-gray-900\/30:hover {
+  background-color: rgba(11, 12, 16, 0.9) !important;
+}
+
+.bg-gray-700 {
+  background-color: rgba(59, 95, 155, 0.45) !important;
+}
+
+.border-gray-700,
+.border-gray-800,
+.divide-gray-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(111, 159, 185, 0.26) !important;
+}
+
+.text-gray-200 {
+  color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.text-gray-300 {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.text-gray-400 {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.text-gray-500 {
+  color: rgba(255, 255, 255, 0.56) !important;
+}
+
+.text-gray-600 {
+  color: rgba(255, 255, 255, 0.44) !important;
+}
+
+.text-red-300,
+.text-red-500,
+.bg-red-500\/10,
+.border-red-500\/20 {
+  color: #c6d4e3 !important;
+  border-color: rgba(111, 159, 185, 0.3) !important;
+  background-color: rgba(111, 159, 185, 0.14) !important;
+}
+
+.text-green-500,
+.bg-green-500\/10 {
+  color: #c6d4e3 !important;
+  background-color: rgba(111, 159, 185, 0.14) !important;
+}
