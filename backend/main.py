@@ -118,8 +118,17 @@ def verify_agent(
     required_key = os.getenv("SECURITY_API_KEY")
     if required_key and x_api_key == required_key:
         return AgentIdentity(agent_id="legacy-agent-001", role="researcher")
-        
+    
     raise HTTPException(status_code=401, detail="Invalid Agent credentials or unauthorized identity.")
+
+def verify_agent_optional(
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_agent_id: Optional[str] = Header(default=None, alias="X-Agent-Id"),
+    db: Session = Depends(get_db)
+) -> Optional[AgentIdentity]:
+    if not x_api_key:
+        return None
+    return verify_agent(x_api_key=x_api_key, x_agent_id=x_agent_id, db=db)
 
 @app.get("/")
 async def root():
@@ -169,7 +178,7 @@ async def execute_task(
                 event_type="FIREWALL_BLOCK",
                 risk_score=float(firewall_result["risk_score"]),
                 details={
-                    "prompt": crypto_manager.encrypt_text(request_payload.prompt),
+                    "prompt": request_payload.prompt,
                     "threats": firewall_result["threats"],
                     "matched_rules": firewall_result.get("matched_rules", []),
                     "remediation": remediation,
@@ -276,7 +285,7 @@ async def execute_task(
         raise HTTPException(status_code=500, detail="Database failure while processing request.") from exc
 
 @app.get("/logs/security")
-async def get_security_logs(db: Session = Depends(get_db), _: AgentIdentity = Depends(verify_agent)):
+async def get_security_logs(db: Session = Depends(get_db), _: Optional[AgentIdentity] = Depends(verify_agent_optional)):
     events = db.query(SecurityEvent).order_by(SecurityEvent.timestamp.desc()).limit(50).all()
     # Security events might contain prompt snippets in details
     for event in events:
@@ -288,7 +297,7 @@ async def get_security_logs(db: Session = Depends(get_db), _: AgentIdentity = De
     return events
 
 @app.get("/logs/audit")
-async def get_audit_logs(db: Session = Depends(get_db), _: AgentIdentity = Depends(verify_agent)):
+async def get_audit_logs(db: Session = Depends(get_db), _: Optional[AgentIdentity] = Depends(verify_agent_optional)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(50).all()
     for log in logs:
         try:

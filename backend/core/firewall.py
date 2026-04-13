@@ -41,6 +41,7 @@ class PromptFirewall:
             re.compile(r"(?i)\bbypass\s+security\b"),
         ]
         self.block_threshold = 0.60
+        # Internal trigger for deeper LLM reasoning on gray-area prompts.
         self.review_threshold = 0.30
 
     def _analyze_base64(self, prompt: str) -> Dict[str, Any]:
@@ -122,17 +123,10 @@ class PromptFirewall:
         except Exception:
             pass
 
-        # Check threshold again
+        # Keep evaluating gray-zone prompts with LLM before final verdict.
+        # This avoids short-circuiting on ML-only risk and preserves
+        # `llm_reasoning_threat` attribution for explainability.
         risk_score = min(risk_score, 1.0)
-        if risk_score >= self.block_threshold:
-            return {
-                "is_blocked": True,
-                "status": "blocked",
-                "decision": "block",
-                "risk_score": round(risk_score, 4),
-                "threats": sorted(set(threats_found)),
-                "matched_rules": sorted(set(matched_rules)),
-            }
 
         # TIER 3: LLM REASONING LAYER
         # Evaluate "gray area" prompts that regex & ML suspect but don't strictly block
@@ -155,14 +149,13 @@ class PromptFirewall:
             ):
                 risk_score = risk_score * 0.2
 
-        # Final verdict
+        # Final verdict policy (as requested):
+        # - safe: 0.00 to <0.60
+        # - blocked: >=0.60 to 1.00
         risk_score = min(risk_score, 1.0)
         if risk_score >= self.block_threshold:
             decision = "block"
             status = "blocked"
-        elif risk_score >= self.review_threshold:
-            decision = "review"
-            status = "review"
         else:
             decision = "allow"
             status = "safe"

@@ -4,22 +4,104 @@
 
 :root {
   color-scheme: dark;
+  --bg-0: #0a0b0f;
+  --fg-0: #d5d9df;
+  --p-1: #6f9fb9;
+  --p-2: #3b5f9b;
+  --p-3: #363b7c;
 }
 
 body {
-  @apply bg-gray-950 text-gray-100;
+  background: radial-gradient(1200px 700px at 80% -10%, rgba(111, 159, 185, 0.16), transparent 60%),
+    linear-gradient(180deg, #0b0c10 0%, #090a0d 100%);
+  color: var(--fg-0);
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 .glass-card {
-  @apply bg-gray-900/50 backdrop-blur-md border border-gray-800 rounded-xl overflow-hidden;
+  @apply rounded-2xl overflow-hidden;
+  background: rgba(12, 14, 20, 0.66);
+  border: 1px solid rgba(111, 159, 185, 0.26);
 }
 
 .glow-blue {
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.2);
+  box-shadow: 0 0 22px rgba(59, 95, 155, 0.24);
 }
 
 .glow-red {
-  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+/* Palette bridge for existing Tailwind utility usage in App.jsx */
+.bg-blue-600 {
+  background-color: var(--p-2) !important;
+}
+
+.hover\:bg-blue-500:hover {
+  background-color: var(--p-3) !important;
+}
+
+.bg-blue-500\/5 {
+  background-color: rgba(111, 159, 185, 0.12) !important;
+}
+
+.bg-blue-500\/10 {
+  background-color: rgba(111, 159, 185, 0.16) !important;
+}
+
+.bg-blue-400\/5 {
+  background-color: rgba(111, 159, 185, 0.12) !important;
+}
+
+.text-blue-100 {
+  color: #d9dee7 !important;
+}
+
+.text-blue-200,
+.text-blue-300 {
+  color: #c6d4e3 !important;
+}
+
+.text-blue-400,
+.text-blue-500 {
+  color: var(--p-1) !important;
+}
+
+.border-blue-500\/10 {
+  border-color: rgba(111, 159, 185, 0.18) !important;
+}
+
+.border-blue-500\/20 {
+  border-color: rgba(111, 159, 185, 0.28) !important;
+}
+
+.border-blue-500\/30 {
+  border-color: rgba(111, 159, 185, 0.36) !important;
+}
+
+.border-blue-500\/40,
+.border-blue-500\/60,
+.border-blue-400\/20 {
+  border-color: rgba(59, 95, 155, 0.5) !important;
+}
+
+.focus\:ring-blue-500:focus {
+  --tw-ring-color: rgba(111, 159, 185, 0.5) !important;
+}
+
+.from-blue-500 {
+  --tw-gradient-from: var(--p-1) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(111 159 185 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.to-indigo-600 {
+  --tw-gradient-to: var(--p-3) var(--tw-gradient-to-position) !important;
+}
+
+.shadow-blue-500\/20,
+.shadow-blue-600\/20 {
+  --tw-shadow-color: rgba(59, 95, 155, 0.28) !important;
+  --tw-shadow: var(--tw-shadow-colored) !important;
 }

@@ -2,6 +2,9 @@ from sqlalchemy import Column, DateTime, Float, Integer, JSON, String, Text, Boo
 from ..db.config import Base
 import datetime
 
+def _utcnow():
+    return datetime.datetime.now(datetime.timezone.utc)
+
 class AgentIdentity(Base):
     __tablename__ = "agent_identities"
 
@@ -10,7 +13,7 @@ class AgentIdentity(Base):
     role = Column(String)  # e.g., 'researcher', 'admin'
     api_key_hash = Column(String)  # SHA-256 hashed token
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class SecurityEvent(Base):
@@ -21,7 +24,7 @@ class SecurityEvent(Base):
     event_type = Column(String) # FIREWALL_BLOCK, HONEYPOT_TRIGGER, DLP_FINDING, etc.
     risk_score = Column(Float)
     details = Column(JSON)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -33,4 +36,4 @@ class AuditLog(Base):
     status = Column(String, index=True) # ALLOWED, BLOCKED, MODIFIED
     input_text = Column(Text)
     output_text = Column(Text)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow)

@@ -28,7 +28,7 @@ class RateLimiter:
     def check_rate_limit(self, agent_id: str) -> None:
         """Enforces a fixed-window rate limit for a specific agent identity."""
         current_minute = int(time.time() // self.window)
-        key = f"rate_limit:{agent_id}:{current_minute}"
+        key = f"rate_limit:{agent_id}:{self.window}:{self.limit}:{current_minute}"
         
         if self.use_redis:
             try:
@@ -50,11 +50,15 @@ class RateLimiter:
         # Fallback in-memory logic
         if key not in self._in_memory_fallback:
             # Cleanup old keys to prevent memory leak
-            self._in_memory_fallback = {k: v for k, v in self._in_memory_fallback.items() if str(current_minute) in k}
+            suffix = f":{current_minute}"
+            self._in_memory_fallback = {k: v for k, v in self._in_memory_fallback.items() if k.endswith(suffix)}
             self._in_memory_fallback[key] = 0
             
         self._in_memory_fallback[key] += 1
         if self._in_memory_fallback[key] > self.limit:
             raise HTTPException(status_code=429, detail="Rate limit exceeded. Too many requests to AI tools.")
 
-rate_limiter = RateLimiter(limit=15, window=60)
+rate_limiter = RateLimiter(
+    limit=int(os.environ.get("RATE_LIMIT_PER_WINDOW", 60)),
+    window=int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", 60)),
+)

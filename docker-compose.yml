@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:15
     container_name: aegismind-db
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: aegisuser
       POSTGRES_PASSWORD: aegispassword
@@ -11,10 +11,17 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegisuser -d aegismind"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
 
   backend:
     build: ./backend
     container_name: aegismind-backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -23,23 +30,44 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   redis:
     image: redis:alpine
     container_name: aegismind-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   frontend:
     build: ./frontend
     container_name: aegismind-frontend
+    restart: unless-stopped
     environment:
       - VITE_PROXY_TARGET=http://backend:8000
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173 > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:
