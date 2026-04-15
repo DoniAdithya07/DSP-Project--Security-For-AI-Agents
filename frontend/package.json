@@ -11,7 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "react": "^18.2.0",
+    "react": "^19.2.5",
     "react-dom": "^18.2.0",
     "framer-motion": "^10.16.4",
     "lucide-react": "^0.284.0",
@@ -22,7 +22,7 @@
     "tailwind-merge": "^1.14.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.15",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^18.2.7",
     "@vitejs/plugin-react": "^4.0.3",
     "@playwright/test": "^1.53.0",
