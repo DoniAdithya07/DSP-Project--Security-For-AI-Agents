@@ -43,6 +43,24 @@ class PromptFirewall:
         self.block_threshold = 0.60
         # Internal trigger for deeper LLM reasoning on gray-area prompts.
         self.review_threshold = 0.30
+        self.external_patterns: List[Dict[str, Any]] = []
+
+    def update_threat_feed(self, rules: List[Dict[str, Any]]) -> None:
+        compiled: List[Dict[str, Any]] = []
+        for rule in rules or []:
+            pattern_text = str(rule.get("pattern", "")).strip()
+            if not pattern_text:
+                continue
+            try:
+                compiled.append({
+                    "rule_id": str(rule.get("rule_id") or "external_rule"),
+                    "reason": str(rule.get("reason") or "Threat intel feed match"),
+                    "weight": float(rule.get("weight") or 0.65),
+                    "pattern": re.compile(pattern_text, re.IGNORECASE),
+                })
+            except Exception:
+                continue
+        self.external_patterns = compiled
 
     def _analyze_base64(self, prompt: str) -> Dict[str, Any]:
         findings: List[str] = []
@@ -74,6 +92,9 @@ class PromptFirewall:
         threats_found: List[str] = []
         matched_rules: List[str] = []
         risk_score = 0.0
+        regex_component = 0.0
+        ml_component = 0.0
+        llm_component = 0.0
 
         # TIER 1: RULE-BASED ENGINE
         for rule_id, pattern, reason, weight in self.rulebook:
@@ -81,26 +102,39 @@ class PromptFirewall:
                 matched_rules.append(rule_id)
                 threats_found.append(reason)
                 risk_score += weight
+                regex_component += weight
+
+        # Threat intelligence feed (runtime-managed patterns)
+        for ext_rule in self.external_patterns:
+            if ext_rule["pattern"].search(normalized_prompt):
+                matched_rules.append(f"threat_intel:{ext_rule['rule_id']}")
+                threats_found.append(ext_rule["reason"])
+                risk_score += ext_rule["weight"]
+                regex_component += ext_rule["weight"]
 
         if len(normalized_prompt) > 4000:
             matched_rules.append("oversized_prompt")
             threats_found.append("Excessive prompt length")
             risk_score += 0.25
+            regex_component += 0.25
 
         fence_count = len(re.findall(r"(```|###|\-\-\-|\*\*\*)", normalized_prompt))
         if fence_count >= 3:
             matched_rules.append("excessive_fencing")
             threats_found.append("Unusual boundary/fence manipulation")
             risk_score += 0.30
+            regex_component += 0.30
 
         b64_result = self._analyze_base64(normalized_prompt)
         risk_score += b64_result["score"]
+        regex_component += b64_result["score"]
         threats_found.extend(b64_result["findings"])
         matched_rules.extend(b64_result["rules"])
 
         # Early short-circuit if regex clearly blocked it.
         risk_score = min(risk_score, 1.0)
         if risk_score >= self.block_threshold:
+            regex_decision = "block" if regex_component >= self.block_threshold else "allow"
             return {
                 "is_blocked": True,
                 "status": "blocked",
@@ -108,6 +142,15 @@ class PromptFirewall:
                 "risk_score": round(risk_score, 4),
                 "threats": sorted(set(threats_found)),
                 "matched_rules": sorted(set(matched_rules)),
+                "multi_model_guard": {
+                    "models": {
+                        "regex": {"score": round(min(regex_component, 1.0), 4), "decision": regex_decision},
+                        "ml": {"score": 0.0, "decision": "allow"},
+                        "llm": {"score": 0.0, "decision": "allow"},
+                    },
+                    "block_votes": 1 if regex_decision == "block" else 0,
+                    "final_vote": "block",
+                },
             }
 
         # TIER 2: ML CLASSIFICATION LAYER
@@ -117,9 +160,11 @@ class PromptFirewall:
                 matched_rules.append("ml_semantic_threat")
                 threats_found.append(f"ML semantic adversarial intent (Confidence: {ml_risk:.2f})")
                 risk_score += max(0.5, ml_risk)
+                ml_component = max(0.5, ml_risk)
             else:
                 # Bump the base risk natively so gray areas trigger the LLM review threshold
                 risk_score += ml_risk
+                ml_component = ml_risk
         except Exception:
             pass
 
@@ -136,10 +181,12 @@ class PromptFirewall:
                 matched_rules.append("llm_reasoning_threat")
                 threats_found.append(f"LLM Cognitive Security failure: {llm_result['reason']} (Confidence: {llm_result['confidence']:.2f})")
                 risk_score = 1.0
+                llm_component = float(llm_result["confidence"])
             elif not llm_result["is_malicious"] and llm_result["confidence"] >= 0.80:
                 # DE-ESCALATION: LLM confirms this is a benign, safe prompt. 
                 # We trust the high-confidence reasoning of Llama3 over Tier 1/2 suspicions.
                 risk_score = risk_score * 0.2 # Drastically reduce the score
+                llm_component = float(llm_result["confidence"]) * 0.2
             elif (
                 not llm_result["is_malicious"]
                 and float(llm_result.get("confidence", 0.0)) == 0.0
@@ -160,6 +207,11 @@ class PromptFirewall:
             decision = "allow"
             status = "safe"
 
+        regex_decision = "block" if min(regex_component, 1.0) >= self.block_threshold else "allow"
+        ml_decision = "block" if ml_component >= 0.70 else "allow"
+        llm_decision = "block" if llm_component >= 0.60 and "llm_reasoning_threat" in matched_rules else "allow"
+        block_votes = len([vote for vote in (regex_decision, ml_decision, llm_decision) if vote == "block"])
+
         return {
             "is_blocked": decision == "block",
             "status": status,
@@ -167,6 +219,15 @@ class PromptFirewall:
             "risk_score": round(risk_score, 4),
             "threats": sorted(set(threats_found)),
             "matched_rules": sorted(set(matched_rules)),
+            "multi_model_guard": {
+                "models": {
+                    "regex": {"score": round(min(regex_component, 1.0), 4), "decision": regex_decision},
+                    "ml": {"score": round(min(ml_component, 1.0), 4), "decision": ml_decision},
+                    "llm": {"score": round(min(llm_component, 1.0), 4), "decision": llm_decision},
+                },
+                "block_votes": block_votes,
+                "final_vote": decision,
+            },
         }
 
 firewall = PromptFirewall()

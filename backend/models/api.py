@@ -9,6 +9,8 @@ class ExecuteRequest(BaseModel):
     role: Literal["researcher", "support", "admin"] = "researcher"
     requested_tool: Optional[str] = Field(default=None, max_length=40)
     tool_args: Dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+    approval_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("prompt")
     @classmethod

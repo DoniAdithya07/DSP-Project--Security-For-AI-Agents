@@ -1,4 +1,4 @@
-# AegisMind: A Defense-in-Depth Security Framework for Agentic AI Workflows
+# AegisMind: Defense-in-Depth Security Framework for Agentic AI (Current Version Report)
 
 **Course:** Data Security and Privacy (DS-208)  
 **Professor:** Dr Girish Revadigar  
@@ -6,257 +6,183 @@
 - A. Doni Adithya (23bds007)  
 - E. Hari Teja (23bds019)  
 - Hari Prasad L. (23bds022)  
-- L. Sahith Akash Manikanta (23bds031)
+- L. Sahith Akash Manikanta (23bds031)  
+**Version Snapshot Date:** April 14, 2026
 
 ---
 
 ## Abstract
-Agentic AI systems increasingly combine natural language reasoning with external tool execution, database access, and multi-step action planning. This capability improves automation but also expands the attack surface to include prompt injection, role manipulation, unsafe tool chaining, data exfiltration, and denial-of-wallet style abuse. This project presents **AegisMind**, a FastAPI-based security framework that applies a defense-in-depth architecture before any agent action is executed. The framework combines (i) a three-tier prompt firewall (rule-based, machine learning, and LLM-assisted reasoning), (ii) role-based policy and risk-budget enforcement, (iii) a secure tool gateway with strict allow-listing and argument validation, (iv) data leakage prevention with masking/blocking, (v) behavioral anomaly detection with adaptive self-healing responses, and (vi) comprehensive audit and security event logging with encryption at rest. A web dashboard provides operational visibility through threat metrics and live logs. Experimental validation through automated tests and targeted adversarial prompts demonstrates practical blocking of injection-style and encoded attacks while preserving safe interactions. The report details architecture, implementation, evaluation, and limitations, and outlines a roadmap for production-hardening.
+Agentic AI systems increase automation power but also expand the attack surface to prompt injection, role abuse, unsafe tool calls, secret leakage, and operational overload. This report presents the current production-oriented version of **AegisMind**, a FastAPI + React security framework that enforces layered controls before and during tool execution. The system combines multi-model prompt risk scoring (regex + ML + LLM voting), role-aware policy enforcement, per-tool risk profiles, human approval workflow, DLP output protection, behavioral anomaly handling, encrypted audit/event logging, and operational governance APIs. The latest version adds dashboard user authentication, policy versioning with change audit, threat-intel feed sync, backup/restore and archive operations, scheduled maintenance controls, calibration feedback for risk tuning, realtime security streaming, scorecard analytics, and dependency automation. Validation shows stable behavior on backend and frontend quality checks.
 
-**Keywords:** Agentic AI security, prompt injection defense, policy engine, data leakage prevention, honeypot deception, adaptive remediation, secure tool execution.
+**Keywords:** Agentic AI security, prompt firewall, policy governance, human approval, DLP, threat intelligence, observability.
 
 ---
 
 ## I. Introduction
-Large Language Models (LLMs) are rapidly moving from passive chat interfaces to **agentic systems** that can call APIs, query data stores, and execute workflows. This transition introduces high-impact security and privacy risks. Traditional perimeter security is insufficient because adversarial instructions may be embedded directly inside user prompts or secondary data sources (documents, web pages, encoded text). In addition, unsafe tool usage can escalate privileges or expose secrets.
+AI agents now execute actions across tools, APIs, and data systems. A single unsafe prompt can propagate into tool misuse or sensitive data exposure. AegisMind addresses this through runtime security-by-design: every execution request is filtered, scored, authorized, monitored, and logged with explainability.
 
-The AegisMind project addresses this gap by implementing a layered, runtime security architecture that governs an agent request from input validation to output sanitization. Instead of relying on a single classifier or static deny-list, AegisMind combines multiple detection and control layers with explicit auditability.
-
-The project was developed as part of **DS-208 (Data Security and Privacy)** and focuses on practical controls that can be demonstrated, tested, and iteratively hardened.
+This report reflects the **current implemented version** of AegisMind after security-hardening and operations upgrades.
 
 ---
 
-## II. Problem Definition and Threat Model
+## II. Problem Statement and Threat Model
 
 ### A. Problem Statement
-Given a user prompt and optional tool request, determine whether the action should be allowed, modified, reviewed, or blocked, while protecting system integrity, confidentiality, and operational availability.
+Given an incoming prompt and optional tool request, decide whether execution should be allowed, modified, approval-gated, or blocked while preserving confidentiality, integrity, and availability.
 
-### B. Security Objectives
-1. Prevent prompt-level attacks (injection, role override, policy bypass).  
-2. Restrict tool execution by role, risk score, and chaining behavior.  
-3. Block or redact sensitive output data before response delivery.  
-4. Maintain forensic-quality logs and explainable decisions.  
-5. Adaptively respond to repeated or high-confidence malicious behavior.
+### B. Threats Considered
+1. Prompt injection and jailbreak language.  
+2. Role manipulation and policy bypass attempts.  
+3. Encoded malicious intent (including Base64 patterns).  
+4. Unauthorized or high-risk tool invocation.  
+5. Sensitive output exfiltration (tokens, keys, credentials, PII).  
+6. Denial-of-wallet and traffic spikes.
 
-### C. Adversary Model
-The framework assumes adversaries may:
-- Issue direct malicious prompts.
-- Use indirect/encoded instructions (e.g., Base64).
-- Attempt identity spoofing or privilege escalation.
-- Probe restricted tools repeatedly.
-- Trigger high-rate calls to degrade availability.
-
-The framework does **not** assume trusted prompt content, and therefore performs explicit, staged verification.
+### C. Security Goals
+1. Strong prevention before tool execution.  
+2. Enforced least-privilege role and tool access.  
+3. Human-in-the-loop for medium/high risk operations.  
+4. Forensic observability with tamper-resistant records.  
+5. Operational reliability under load.
 
 ---
 
-## III. System Architecture
+## III. System Architecture (Current)
 
-### A. High-Level Pipeline
-1. Client request enters `/agent/execute`.  
-2. Identity and API key validation are applied.  
-3. Rate limiting is checked per agent identity.  
-4. Prompt firewall computes risk and decision (`safe`, `review`, `blocked`).  
-5. For non-blocked flows, tool selection/inference is performed.  
-6. Secure gateway enforces policy, behavior, and honeypot/deception checks.  
-7. Tool output passes through DLP masking/blocking.  
-8. Final response and security metadata are logged.
+### A. End-to-End Flow
+1. Request enters `/agent/execute`.  
+2. Auth is verified via agent key headers or dashboard bearer token.  
+3. Rate-limiter and queue/backpressure guardrails are enforced.  
+4. Prompt firewall computes risk and decision (`safe` vs `blocked`, with explainability).  
+5. Tool selection is validated against policy and per-tool risk profiles.  
+6. Human approval may be required for elevated risk operations.  
+7. Secure gateway executes allow-listed tools only.  
+8. DLP scans and modifies/blocks risky output.  
+9. Audit + security events are stored (encrypted fields).  
+10. Realtime events are broadcast over WebSocket.
 
-### B. Core Components
-- **Prompt Firewall:** Rule + ML + LLM multi-tier analysis.  
-- **Policy Engine:** Role-based authorization and risk budgeting.  
-- **Secure Tool Gateway:** Allow-list execution only, with strict argument validation.  
-- **DLP Module:** Sensitive content detection and masking/blocking.  
-- **Behavioral Detector:** Session-level anomaly scoring.  
-- **Self-Healing Engine:** Automatic containment modes.  
-- **Honeypot Layer:** Deception for sensitive probing.  
-- **Rate Limiter:** Abuse control using Redis with fallback.
-
----
-
-## IV. Implementation Details
-
-### A. Backend Service
-The backend is implemented with FastAPI and SQLAlchemy. Key endpoints:
-- `POST /agent/execute`
-- `GET /logs/security`
-- `GET /logs/audit`
-
-Authentication supports:
-- `X-API-Key` + `X-Agent-Id` mapped to stored identity hashes.
-- Optional legacy mode via `SECURITY_API_KEY`.
-
-On first startup, an initial admin identity is created if none exists.
-
-### B. Prompt Firewall Design
-The firewall performs staged analysis:
-1. **Rule-Based Layer**: regex patterns for jailbreak, role manipulation, secret exfiltration, destructive commands, and encoded-instruction intent.
-2. **ML Layer**: semantic adversarial scoring using TF-IDF + Logistic Regression.
-3. **LLM Layer**: cognitive reasoning for gray-zone prompts.
-
-Decision thresholds in current implementation:
-- Review threshold: `0.30`
-- Block threshold: `0.60`
-
-The final risk score is normalized and returned with matched rule identifiers for explainability.
-
-### C. Policy and Authorization
-The policy engine enforces:
-- Role-specific allow/deny tool sets.
-- Per-role maximum risk budgets.
-- Global blocked tool list.
-- Unsafe chain detection across recent tool calls.
-
-Current role risk budgets:
-- `researcher`: `0.35`
-- `support`: `0.45`
-- `admin`: `0.75`
-
-### D. Secure Tool Gateway
-The gateway:
-- Validates tool names and argument keys/types.
-- Uses allow-listed handlers only (`web_search`, `calculator`, `summarizer`, `customer_lookup`, `issue_tracker`, `db_read`).
-- Applies behavioral checks before execution.
-- Calls policy engine before tool execution.
-- Applies output DLP scrub before returning result.
-
-No arbitrary shell execution pathway is exposed in tool handlers.
-
-### E. Data Leakage Prevention
-The DLP module scans tool output for:
-- API keys/tokens/password assignments
-- bearer tokens
-- private key blocks
-- emails/phone numbers/credit card patterns
-
-If findings are low/high severity, output is masked and status may become `modified`.  
-If critical leakage is detected, output is blocked.
-
-### F. Behavioral Detection and Adaptive Self-Healing
-Behavioral controls track per-session tool usage and apply risk increments for:
-- Excessive invocation velocity
-- Sensitive tool chaining
-- Repeated sensitive probing
-
-Adaptive remediation states:
-- `TEMP_COOLDOWN`
-- `RESTRICTED_MODE`
-- `CRITICAL_LOCKDOWN`
-
-Repeated firewall blocks can trigger automated cooldown and escalation.
-
-### G. Honeypot Deception
-Access attempts to prohibited high-value tools trigger deception responses and monitoring events. This supports adversary observation while reducing direct exposure risk.
-
-### H. Encryption and Storage
-Database entities:
-- `agent_identities`
-- `security_events`
-- `audit_logs`
-
-Prompt and output fields are encrypted using Fernet.  
-API keys are stored as SHA-256 hashes.  
-If `ENCRYPTION_KEY` is not configured, an ephemeral key is generated at runtime.
+### B. Major Components
+1. Prompt Firewall (regex + ML + LLM + vote metadata).  
+2. Policy Engine (role policies, global denies, chain restrictions, approval threshold).  
+3. Secure Tool Gateway (strict tool and argument validation).  
+4. DLP Module (mask/block secrets and sensitive patterns).  
+5. Behavioral + Self-Healing Engine (cooldown/restricted/lockdown).  
+6. Threat Intel Feed (manual import + remote sync + scheduled refresh).  
+7. Ops Layer (archives, key rotation, backup/restore, SLO metrics).  
+8. Governance APIs (policy versioning, change audit trail, approvals).
 
 ---
 
-## V. Frontend Monitoring Dashboard
-The React dashboard provides:
-- Security playground for prompt execution.
-- Master key entry and session persistence.
-- Threat metrics and risk timeline charts.
-- Live security alerts.
-- Audit log table with action/status/output summaries.
+## IV. Key Features Implemented
 
-It is designed for operator visibility and demo-driven verification of controls.
+### A. Authentication and Access
+1. Dashboard login with bearer tokens (`/auth/login`, `/auth/logout`, `/auth/me`).  
+2. Role/team-aware user records (`viewer`, `analyst`, `admin`).  
+3. Admin user management endpoint (`/auth/users`).  
+4. Optional strict log access mode (`LOGS_REQUIRE_DASHBOARD_AUTH`).
 
----
+### B. Secrets and Key Lifecycle
+1. Secret loading supports `/run/secrets` + environment fallback.  
+2. Rotating API keys table with active/inactive states.  
+3. Manual rotation endpoint (`/ops/api-keys/rotate`).  
+4. Scheduled auto-rotation controls via env configuration.
 
-## VI. Deployment and Operations
+### C. Prompt Risk and Explainability
+1. Multi-model guard output with component scores and vote summary.  
+2. Safe/Block zone policy configured as:
+   - **Safe Zone:** `0–60%`  
+   - **Block Zone:** `60–100%`  
+3. Explainability payload includes matched rules, threats, model votes, and calibration metadata.
 
-### A. Containerized Deployment
-`docker-compose.yml` orchestrates:
-- PostgreSQL database
-- Backend API
-- Redis
-- Frontend (Vite dev server)
+### D. Policy Governance
+1. Policy export/apply with validation.  
+2. Policy versions and change audit trail tables.  
+3. Publish endpoint with change note (`/policy/publish`).  
+4. Policy Studio UI in Ops tab.
 
-Default service URLs:
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
-- API Docs: `http://localhost:8000/docs`
+### E. Human Approval Workflow
+1. Pending approval creation for high-risk operations.  
+2. Reviewer decision API (`approve` / `reject`).  
+3. Pending approvals dashboard view and actions.
 
-### B. Runtime Configuration
-Important environment variables:
-- `SECURITY_API_KEY`
-- `CORS_ALLOW_ORIGINS`
-- `ENCRYPTION_KEY`
-- `LLM_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `GEMINI_API_KEY`
-- `REDIS_HOST`, `REDIS_PORT`
+### F. Threat Intelligence
+1. Manual rule import (`/threat-intel/import`).  
+2. Remote feed sync (`/threat-intel/sync`).  
+3. Feed status endpoint with last sync/error telemetry.  
+4. Scheduled polling support through maintenance loop.
 
----
+### G. Session Replay and Realtime Stream
+1. Session replay API (`/sessions/{id}/replay`).  
+2. WebSocket live stream (`/ws/security-stream`).  
+3. Ops UI displays replay timeline and live events.
 
-## VII. Experimental Evaluation
+### H. Scorecard and Calibration
+1. Security scorecard API (`/analytics/scorecard`) with safe-vs-blocked trend.  
+2. Calibration feedback collection (`/analytics/calibration/feedback`).  
+3. Bias summary endpoint (`/analytics/calibration/summary`) for tuning.
 
-### A. Test Methodology
-Evaluation used:
-1. Automated backend tests (`pytest`) for core security behavior.
-2. Adversarial prompt demonstrations from the dashboard.
-3. Inspection of audit/security logs for decision traceability.
+### I. Reliability and Operations
+1. Queue limit, semaphore concurrency cap, timeout budget, backpressure responses.  
+2. Archive endpoint + archive index (`/ops/logs/archive`, `/ops/logs/archives`).  
+3. Backup create/list/restore (`/ops/backup/create`, `/ops/backups`, `/ops/backup/restore`).  
+4. SLO snapshot endpoint (`/observability/slo`).  
+5. Optional OpenTelemetry bootstrap hook.
 
-### B. Attack Scenarios Demonstrated
-- Prompt injection attempts
-- Role manipulation prompts
-- Base64 decode-and-execute intent
-- Unauthorized tool usage
-- DLP-triggering secret-like outputs
-- Rate-limit enforcement behavior
-
-### C. Current Test Snapshot
-In the latest observed run:
-- Total tests: `16`
-- Passed: `13`
-- Failed: `3`
-
-Failure causes were primarily test-harness level (authentication expectation and rate-limit state interactions), not a complete failure of detection layers. This indicates a need for improved test isolation and deterministic reset procedures.
-
-### D. Qualitative Outcomes
-AegisMind consistently produced structured block responses for high-risk prompts and provided actionable reasons in logs. Safe prompts proceeded through the normal execution path with auditable outcomes.
+### J. CI and Dependency Security
+1. CI workflow for backend tests, frontend lint/build, optional audits.  
+2. Pinned backend dependency versions.  
+3. Dependabot automation for pip, npm, and GitHub Actions.
 
 ---
 
-## VIII. Discussion
-The project demonstrates that combining orthogonal defenses yields better practical resilience than single-point filtering. Rule-based checks provide fast deterministic coverage, ML contributes semantic sensitivity, and LLM-based evaluation improves handling of ambiguous intent. Policy and gateway controls reduce blast radius even when model inference is imperfect.
-
-The architecture also supports operational security through explainable events and adaptive response states, which are crucial in real-world SOC workflows.
-
----
-
-## IX. Limitations
-1. LLM-based evaluation depends on provider availability/latency.  
-2. Regex and synthetic ML training data may miss novel attack patterns.  
-3. Ephemeral encryption keys reduce post-restart decryptability without key management.  
-4. Current frontend has additional tabs that can be expanded for full operator workflows.  
-5. Test suite requires better state reset for rate-limiting and identity assumptions.
+## V. Frontend (Current Dashboard)
+The frontend now includes:
+1. `Dashboard` tab: prompt execution, simulator, explainability, guidance.  
+2. `Agent` tab: decision pipeline and reasoning trace.  
+3. `Logs` tab: filtered audit stream and exports.  
+4. `Settings` tab: runtime connection configuration.  
+5. **`Ops` tab**: login, policy studio, approvals, threat intel, tool profiles, replay, realtime stream, scorecard, calibration, key rotation, backups, and user management.
 
 ---
 
-## X. Future Work
-1. Integrate managed key vault/KMS for production-grade key lifecycle.  
-2. Add SIEM/webhook connectors for enterprise monitoring integration.  
-3. Expand adversarial corpus and benchmark framework robustness.  
-4. Add model confidence calibration and policy-driven human approvals.  
-5. Improve chaos/security testing under high concurrency and mixed benign/adversarial loads.
+## VI. Experimental Verification (Current Snapshot)
+Validation performed on current codebase:
+
+1. Backend tests (`pytest`): **18 passed**.  
+2. Frontend lint (`npm run lint`): **passed**.  
+3. Frontend production build (`npm run build`): **passed**.  
+4. Frontend e2e (`npm run test:e2e`): **3 passed**.
+
+This indicates the current version is stable across API security checks, UI quality gates, and key user workflows.
 
 ---
 
-## XI. Conclusion
-AegisMind provides a practical defense-in-depth security framework for agentic AI execution pipelines. By combining multi-tier prompt analysis, strict policy enforcement, secure tool mediation, DLP, adaptive remediation, and encrypted observability, the system significantly improves robustness against common AI-agent attack vectors while preserving usability for legitimate tasks. The project fulfills DS-208 goals by translating core data security and privacy principles into a functioning, testable architecture.
+## VII. Discussion
+The current version moves beyond a demo firewall and into an operations-aware security platform. The combination of model-layer risk analysis, policy governance, approval gating, and incident operations features creates practical defense-in-depth for agent workflows.
+
+The most important improvement is integration: detection, authorization, and operational response are now linked in one system (including auditability and admin controls).
 
 ---
 
-## Acknowledgment
-This project was completed for **Data Security and Privacy (DS-208)** under the guidance of **Dr Girish Revadigar**.
+## VIII. Limitations
+1. OpenTelemetry is optional and depends on additional package availability in target deployment.  
+2. Advanced team-scope enforcement is currently represented in data model and admin UX; enterprise IAM federation is not yet integrated.  
+3. Threat feed quality depends on external source quality and curation.  
+4. Calibration currently uses operator feedback; broader ground-truth pipelines can improve robustness.
+
+---
+
+## IX. Future Work
+1. External identity integration (OIDC/SAML) for enterprise SSO.  
+2. Dedicated notification adapters for email/Slack templates and escalation policies.  
+3. Rich SLO dashboards (Grafana) and long-term telemetry storage.  
+4. Automated policy simulation tests before policy publish.  
+5. Expanded adversarial benchmark suite under high-concurrency mixed traffic.
+
+---
+
+## X. Conclusion
+The current AegisMind version provides a comprehensive security control plane for agentic AI execution. It now includes runtime protection, policy governance, approval workflows, threat feed integration, operational backup/archive tooling, realtime visibility, and verified quality gates. This aligns strongly with DS-208 objectives by translating security and privacy principles into a deployable, testable system.
 
 ---
 
@@ -268,4 +194,4 @@ This project was completed for **Data Security and Privacy (DS-208)** under the 
 [5] Scikit-learn Documentation. [Online]. Available: https://scikit-learn.org/stable/  
 [6] Pydantic Documentation. [Online]. Available: https://docs.pydantic.dev/  
 [7] Cryptography (Fernet) Documentation. [Online]. Available: https://cryptography.io/  
-[8] OWASP Top 10 for LLM Applications Project. [Online]. Available: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+[8] OWASP Top 10 for LLM Applications. [Online]. Available: https://owasp.org/www-project-top-10-for-large-language-model-applications/
